@@ -85,7 +85,7 @@
     <div id="game-container">
         <canvas id="game-canvas" width="400" height="600"></canvas>
         <div id="start-screen">
-            <h1>Flappy Bird</h1>
+            <h1>快樂小鳥🐤</h1>
             <p>點擊開始遊戲</p>
             <button id="start-button">開始遊戲</button>
         </div>
@@ -514,21 +514,66 @@
         function startGame() {
             startScreen.style.display = 'none';
             gameOverScreen.style.display = 'none';
-            countdownElement.style.display = 'none';
-            gameStarted = true;
-            gameOver = false;
-            countdownActive = false;
-            interactionEnabled = true;
+            
+            // 初始化游戏状态但还不开始
             bird.reset();
             pipes = [];
             score = 0;
             lastPipeTime = 0;
             
-            // Play background music
-            bgm.currentTime = 0;
-            bgm.play();
+            // 禁用交互直到倒计时结束
+            interactionEnabled = false;
             
-            requestAnimationFrame(gameLoop);
+            // 开始2秒倒计时
+            startInitialCountdown(2, function() {
+                // 倒计时结束后真正开始游戏
+                gameStarted = true;
+                gameOver = false;
+                countdownActive = false;
+                interactionEnabled = true;
+                
+                // 播放背景音乐
+                bgm.currentTime = 0;
+                bgm.play();
+                
+                requestAnimationFrame(gameLoop);
+            });
+        }
+        
+        // 添加开始游戏前的倒计时函数
+        function startInitialCountdown(seconds, callback) {
+            countdownElement.style.display = 'block';
+            let timeLeft = seconds;
+            gameStarted = false;
+            countdownActive = true;
+            
+            // 绘制初始场景
+            drawBackground();
+            drawGround();
+            bird.draw();
+            
+            function updateInitialCountdown() {
+                if (timeLeft <= 0) {
+                    countdownElement.style.display = 'none';
+                    countdownActive = false;
+                    if (callback) callback();
+                    return;
+                }
+                
+                // 更新并显示倒计时
+                countdownElement.textContent = timeLeft;
+                
+                // 重绘场景
+                ctx.clearRect(0, 0, WIDTH, HEIGHT);
+                drawBackground();
+                drawGround();
+                bird.draw();
+                
+                timeLeft--;
+                setTimeout(updateInitialCountdown, 1000);
+            }
+            
+            updateInitialCountdown();
         }
         
         function handleGameOver() {
