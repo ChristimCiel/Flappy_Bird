@@ -1,4 +1,6 @@
-快樂小鳥 🐤
+## 快樂小鳥 🐤 ##
+
+Game URL: https://christimciel.github.io/Flappy_Bird/
 
 快樂小鳥 is a delightful and visually charming HTML5 browser game inspired by Flappy Bird, with a refreshing twist — it features animated trees, cute particle effects, and a whimsical Taiwanese UI. The game is fully written in HTML, CSS, and JavaScript, and runs directly in your browser. No installation required.
 
