@@ -1,0 +1,726 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>快樂小鳥🐤</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #f0f0f0;
+            font-family: Arial, sans-serif;
+        }
+        #game-container {
+            position: relative;
+            border-radius: 20px;
+            overflow: hidden;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        }
+        canvas {
+            display: block;
+            background-color: #70c5ce;
+            border-radius: 20px;
+        }
+        #start-screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background-color: rgba(0, 0, 0, 0.5);
+            color: white;
+            font-size: 24px;
+            border-radius: 20px;
+        }
+        #game-over-screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: none;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background-color: rgba(0, 0, 0, 0.5);
+            color: white;
+            font-size: 24px;
+            border-radius: 20px;
+        }
+        #countdown {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 80px;
+            font-weight: bold;
+            display: none;
+            text-shadow: 0 0 10px rgba(0, 0, 0, 0.8);
+        }
+        button {
+            margin-top: 20px;
+            padding: 10px 20px;
+            font-size: 18px;
+            background-color: #f1c40f;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #f39c12;
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <canvas id="game-canvas" width="400" height="600"></canvas>
+        <div id="start-screen">
+            <h1>Flappy Bird</h1>
+            <p>點擊開始遊戲</p>
+            <button id="start-button">開始遊戲</button>
+        </div>
+        <div id="game-over-screen">
+            <h1>遊戲結束</h1>
+            <p>你的分數: <span id="final-score">0</span></p>
+            <button id="restart-button">重新開始</button>
+        </div>
+        <div id="countdown"></div>
+    </div>
+
+    <!-- 添加音频元素 -->
+    <audio id="bgm" loop>
+        <source src="bgm.mp3" type="audio/mp3">
+    </audio>
+    <audio id="score-sound">
+        <source src="score.mp3" type="audio/mp3">
+    </audio>
+
+    <script>
+        // Game variables
+        const canvas = document.getElementById('game-canvas');
+        const ctx = canvas.getContext('2d');
+        const startScreen = document.getElementById('start-screen');
+        const gameOverScreen = document.getElementById('game-over-screen');
+        const startButton = document.getElementById('start-button');
+        const restartButton = document.getElementById('restart-button');
+        const finalScoreSpan = document.getElementById('final-score');
+        const countdownElement = document.getElementById('countdown');
+        
+        // Audio elements
+        const bgm = document.getElementById('bgm');
+        const scoreSound = document.getElementById('score-sound');
+        
+        const WIDTH = canvas.width;
+        const HEIGHT = canvas.height;
+        const GROUND_HEIGHT = 100;
+        const GROUND_TOP = HEIGHT - GROUND_HEIGHT;
+        const PIPE_GAP = 150;
+        const PIPE_FREQUENCY = 1500; // milliseconds
+        const GROUND_SPEED = 3;
+        const GRAVITY = 0.4;
+        const JUMP_STRENGTH = -6;
+        const BIRD_WIDTH = 30;
+        const BIRD_HEIGHT = 30;
+        const PIPE_WIDTH = 60;
+        
+        let lastTime = 0;
+        let lastPipeTime = 0;
+        let groundX = 0;
+        let score = 0;
+        let highScore = parseInt(localStorage.getItem('flappyHighScore') || '0');
+        let gameOver = false;
+        let gameStarted = false;
+        let countdownActive = false;
+        let interactionEnabled = true;
+        
+        // Bird object
+        const bird = {
+            x: 100,
+            y: 300,
+            width: BIRD_WIDTH,
+            height: BIRD_HEIGHT,
+            velocity: 0,
+            wingAngle: 0,
+            wingDirection: 1,
+            jump: function() {
+                if (!interactionEnabled) return;
+                
+                this.velocity = JUMP_STRENGTH;
+                this.wingAngle = -30; // Reset wing position on jump
+            },
+            update: function() {
+                this.velocity += GRAVITY;
+                this.y += this.velocity;
+                
+                // Animate wing
+                this.wingAngle += this.wingDirection * 5;
+                if (this.wingAngle > 30 || this.wingAngle < -30) {
+                    this.wingDirection *= -1;
+                }
+                
+                // Check if bird hits ground or ceiling
+                if (this.y + this.height >= GROUND_TOP) {
+                    this.y = GROUND_TOP - this.height;
+                    if (!gameOver) {
+                        handleGameOver();
+                    }
+                }
+                if (this.y <= 0) {
+                    this.y = 0;
+                    this.velocity = 0;
+                    if (!gameOver) {
+                        handleGameOver();
+                    }
+                }
+            },
+            draw: function() {
+                // Draw bird body (circle)
+                ctx.fillStyle = '#f1c40f';
+                ctx.beginPath();
+                ctx.arc(this.x, this.y + this.height/2, this.height/2, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Draw single wing - 向后移动翅膀
+                ctx.save();
+                ctx.translate(this.x, this.y + this.height/2);
+                
+                // Wing
+                ctx.fillStyle = '#e67e22';
+                ctx.save();
+                ctx.rotate((this.wingAngle) * Math.PI / 180);
+                ctx.beginPath();
+                ctx.ellipse(-18, 0, 15, 8, 0, 0, Math.PI * 2); // 将x坐标从-5改为-10，更加向后
+                ctx.fill();
+                ctx.restore();
+                
+                ctx.restore();
+                
+                // Draw simple eye
+                ctx.fillStyle = 'black';
+                ctx.beginPath();
+                ctx.arc(this.x + 5, this.y + this.height/2 - 2, 2, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Draw beak
+                ctx.fillStyle = '#e74c3c';
+                ctx.beginPath();
+                ctx.moveTo(this.x + 12, this.y + this.height/2);
+                ctx.lineTo(this.x + 20, this.y + this.height/2 - 3);
+                ctx.lineTo(this.x + 20, this.y + this.height/2 + 3);
+                ctx.fill();
+            },
+            reset: function() {
+                this.y = 300;
+                this.velocity = 0;
+                this.wingAngle = 0;
+            },
+            getBounds: function() {
+                return {
+                    left: this.x - this.height/2,
+                    right: this.x + this.height/2,
+                    top: this.y,
+                    bottom: this.y + this.height
+                };
+            }
+        };
+        
+        // Particles array for effects
+        let particles = [];
+        
+        // Score animations array
+        let scoreAnimations = [];
+        
+        // Particle class
+        class Particle {
+            constructor(x, y, color, isBigEffect = false) {
+                this.x = x;
+                this.y = y;
+                this.size = isBigEffect ? Math.random() * 10 + 5 : Math.random() * 5 + 2;
+                this.speedX = isBigEffect ? Math.random() * 6 - 3 : Math.random() * 3 - 1.5;
+                this.speedY = isBigEffect ? Math.random() * 6 - 3 : Math.random() * 3 - 1.5;
+                this.color = color;
+                this.life = 1; // 1 = full life, 0 = dead
+                this.decay = isBigEffect ? Math.random() * 0.01 + 0.005 : Math.random() * 0.02 + 0.02;
+            }
+            
+            update() {
+                this.x += this.speedX;
+                this.y += this.speedY;
+                this.size *= 0.99;
+                this.life -= this.decay;
+            }
+            
+            draw() {
+                ctx.fillStyle = this.color;
+                ctx.globalAlpha = this.life;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.globalAlpha = 1;
+            }
+        }
+        
+        function createPipe() {
+            const centerY = HEIGHT / 2 + (Math.random() * 200 - 100);
+            
+            pipes.push({
+                x: WIDTH,
+                topHeight: centerY - PIPE_GAP / 2,
+                bottomY: centerY + PIPE_GAP / 2,
+                width: PIPE_WIDTH,
+                passed: false
+            });
+        }
+        
+        function drawPipes() {
+            pipes.forEach(pipe => {
+                // 先绘制树干
+                ctx.fillStyle = '#8B4513'; // 棕色树干
+                
+                // 顶部树干
+                ctx.fillRect(pipe.x + 15, 0, pipe.width - 30, pipe.topHeight - 50);
+                
+                // 底部树干
+                ctx.fillRect(pipe.x + 15, pipe.bottomY + 50, pipe.width - 30, HEIGHT - pipe.bottomY - GROUND_HEIGHT - 50);
+                
+                // 绘制顶部树叶（更宽，更好地覆盖树干）
+                ctx.fillStyle = '#2ecc71'; // 绿色树叶
+                drawTreeLeaf(pipe.x - 25, pipe.topHeight - 70, pipe.width + 50, 70);
+                
+                // 绘制底部树叶
+                drawTreeLeaf(pipe.x - 25, pipe.bottomY, pipe.width + 50, 70);
+                
+                // 在树叶上绘制水平线条
+                ctx.fillStyle = '#27ae60'; // 深绿色线条
+                
+                // 绘制顶部树叶上的线条
+                for (let i = 0; i < 4; i++) {
+                    const y = pipe.topHeight - 60 + i * 15;
+                    const heightPos = (y - (pipe.topHeight - 70)) / 70;
+                    const distFromCenter = Math.abs(heightPos - 0.5) * 2;
+                    const lineWidth = Math.sqrt(1 - distFromCenter * distFromCenter) * (pipe.width + 35);
+                    
+                    ctx.fillRect(pipe.x + pipe.width/2 - lineWidth/2, y, lineWidth, 2);
+                }
+                
+                // 绘制底部树叶上的线条
+                for (let i = 0; i < 4; i++) {
+                    const y = pipe.bottomY + 10 + i * 15;
+                    const heightPos = (y - pipe.bottomY) / 70;
+                    const distFromCenter = Math.abs(heightPos - 0.5) * 2;
+                    const lineWidth = Math.sqrt(1 - distFromCenter * distFromCenter) * (pipe.width + 35);
+                    
+                    ctx.fillRect(pipe.x + pipe.width/2 - lineWidth/2, y, lineWidth, 2);
+                }
+            });
+        }
+        
+        // 创建一个更像真实树叶的绘制函数
+        function drawTreeLeaf(x, y, width, height) {
+            ctx.beginPath();
+            
+            // 绘制一个扁平的椭圆形树叶
+            ctx.ellipse(x + width/2, y + height/2, width/2, height/2, 0, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // 添加一些深色阴影增加立体感
+            ctx.fillStyle = 'rgba(39, 174, 96, 0.3)';
+            ctx.beginPath();
+            ctx.ellipse(x + width/2, y + height/2 + 5, width/2 - 10, height/2 - 10, 0, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        
+        function updatePipes() {
+            pipes.forEach(pipe => {
+                pipe.x -= GROUND_SPEED;
+                
+                // Check if bird passed pipe
+                if (!pipe.passed && pipe.x + pipe.width < bird.x) {
+                    score++;
+                    if (score > highScore) {
+                        highScore = score;
+                        localStorage.setItem('flappyHighScore', highScore.toString());
+                    }
+                    pipe.passed = true;
+                    
+                    // Play score sound
+                    scoreSound.currentTime = 0;
+                    scoreSound.play();
+                    
+                    // Create particle effect when bird passes a pipe (从屏幕下方中间发出)
+                    createPassEffect(WIDTH/2, HEIGHT - 150);
+                }
+                
+                // Check collision with bird
+                const birdBounds = bird.getBounds();
+                
+                // Check collision with top pipe
+                const topLeafRadius = 35; // 调整为新的更大树叶尺寸
+                if (birdBounds.right > pipe.x && birdBounds.left < pipe.x + pipe.width) {
+                    // Collision with trunk
+                    if (birdBounds.top < pipe.topHeight - topLeafRadius) {
+                        handleGameOver();
+                    }
+                    
+                    // Collision with leaf
+                    if (isCircleRectCollision(
+                        bird.x, bird.y + bird.height/2, bird.height/2,
+                        pipe.x - 25, pipe.topHeight - 70, pipe.width + 50, 70)) {
+                        handleGameOver();
+                    }
+                }
+                
+                // Check collision with bottom pipe
+                if (birdBounds.right > pipe.x && birdBounds.left < pipe.x + pipe.width) {
+                    // Collision with trunk
+                    if (birdBounds.bottom > pipe.bottomY + topLeafRadius) {
+                        handleGameOver();
+                    }
+                    
+                    // Collision with leaf
+                    if (isCircleRectCollision(
+                        bird.x, bird.y + bird.height/2, bird.height/2,
+                        pipe.x - 25, pipe.bottomY, pipe.width + 50, 70)) {
+                        handleGameOver();
+                    }
+                }
+            });
+            
+            // Remove pipes that are off screen
+            pipes = pipes.filter(pipe => pipe.x + pipe.width > -50);
+            
+            // Update particles
+            particles.forEach((particle, index) => {
+                particle.update();
+                if (particle.life <= 0) {
+                    particles.splice(index, 1);
+                }
+            });
+            
+            // Update score animations
+            scoreAnimations.forEach((anim, index) => {
+                anim.y -= 2;
+                anim.life -= anim.decay;
+                if (anim.life <= 0) {
+                    scoreAnimations.splice(index, 1);
+                }
+            });
+        }
+        
+        function isCircleRectCollision(circleX, circleY, radius, rectX, rectY, rectWidth, rectHeight) {
+            // Find closest point in rectangle to circle
+            const closestX = Math.max(rectX, Math.min(circleX, rectX + rectWidth));
+            const closestY = Math.max(rectY, Math.min(circleY, rectY + rectHeight));
+            
+            // Calculate distance between circle center and closest point
+            const distX = circleX - closestX;
+            const distY = circleY - closestY;
+            
+            // Check if distance is less than radius
+            return (distX * distX + distY * distY) < (radius * radius);
+        }
+        
+        function drawBackground() {
+            // Draw sky
+            ctx.fillStyle = '#70c5ce';
+            ctx.fillRect(0, 0, WIDTH, HEIGHT);
+            
+            // Draw clouds (softer, more like in the screenshot)
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+            
+            // Cloud 1
+            ctx.beginPath();
+            ctx.arc(100, 100, 30, 0, Math.PI * 2);
+            ctx.arc(150, 90, 35, 0, Math.PI * 2);
+            ctx.arc(190, 100, 25, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Cloud 2
+            ctx.beginPath();
+            ctx.arc(280, 170, 25, 0, Math.PI * 2);
+            ctx.arc(320, 160, 30, 0, Math.PI * 2);
+            ctx.arc(350, 175, 20, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Small hills in background
+            ctx.fillStyle = '#89CE94'; // Light green
+            ctx.beginPath();
+            ctx.moveTo(0, GROUND_TOP);
+            ctx.bezierCurveTo(WIDTH/4, GROUND_TOP - 30, WIDTH/2, GROUND_TOP - 20, WIDTH, GROUND_TOP);
+            ctx.lineTo(WIDTH, GROUND_TOP);
+            ctx.lineTo(0, GROUND_TOP);
+            ctx.fill();
+        }
+        
+        function drawGround() {
+            // Draw ground
+            ctx.fillStyle = '#dec165';
+            ctx.fillRect(0, GROUND_TOP, WIDTH, GROUND_HEIGHT);
+            
+            // Draw ground line
+            ctx.fillStyle = '#8B4513'; // 棕色线条，替换原来的红色
+            ctx.fillRect(0, GROUND_TOP, WIDTH, 6);
+            
+            ctx.fillStyle = '#228B22'; // 绿色线条保持不变
+            ctx.fillRect(0, GROUND_TOP + 6, WIDTH, 6);
+        }
+        
+        function drawScore() {
+            ctx.fillStyle = 'white';
+            ctx.font = '26px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText(`分數: ${score}`, WIDTH / 2, 50);
+            
+            // Add cloud-like background for score
+            const textWidth = ctx.measureText(`分數: ${score}`).width;
+            const padding = 20;
+            const scoreX = WIDTH / 2 - textWidth / 2 - padding / 2;
+            const scoreY = 25;
+            const scoreWidth = textWidth + padding;
+            const scoreHeight = 40;
+            
+            // Draw cloud-like background behind text
+            ctx.save();
+            ctx.globalCompositeOperation = 'destination-over';
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+            drawRoundedRect(scoreX, scoreY, scoreWidth, scoreHeight, 15);
+            ctx.restore();
+        }
+        
+        function drawRoundedRect(x, y, width, height, radius) {
+            ctx.beginPath();
+            ctx.moveTo(x + radius, y);
+            ctx.lineTo(x + width - radius, y);
+            ctx.arc(x + width - radius, y + radius, radius, Math.PI * 1.5, 0, false);
+            ctx.lineTo(x + width, y + height - radius);
+            ctx.arc(x + width - radius, y + height - radius, radius, 0, Math.PI * 0.5, false);
+            ctx.lineTo(x + radius, y + height);
+            ctx.arc(x + radius, y + height - radius, radius, Math.PI * 0.5, Math.PI, false);
+            ctx.lineTo(x, y + radius);
+            ctx.arc(x + radius, y + radius, radius, Math.PI, Math.PI * 1.5, false);
+            ctx.fill();
+        }
+        
+        function startGame() {
+            startScreen.style.display = 'none';
+            gameOverScreen.style.display = 'none';
+            countdownElement.style.display = 'none';
+            gameStarted = true;
+            gameOver = false;
+            countdownActive = false;
+            interactionEnabled = true;
+            bird.reset();
+            pipes = [];
+            score = 0;
+            lastPipeTime = 0;
+            
+            // Play background music
+            bgm.currentTime = 0;
+            bgm.play();
+            
+            requestAnimationFrame(gameLoop);
+        }
+        
+        function handleGameOver() {
+            if (gameOver || countdownActive) return;
+            
+            gameOver = true;
+            interactionEnabled = false;
+            countdownActive = true;
+            
+            // Stop background music after countdown
+            startCountdown(2, function() {
+                bgm.pause();
+                showGameOver();
+            });
+        }
+        
+        function startCountdown(seconds, callback) {
+            // 不再显示倒计时元素
+            countdownElement.style.display = 'none';
+            let timeLeft = seconds;
+            
+            function updateCountdown() {
+                if (timeLeft <= 0) {
+                    countdownActive = false;
+                    if (callback) callback();
+                    return;
+                }
+                
+                timeLeft--;
+                setTimeout(updateCountdown, 1000);
+            }
+            
+            updateCountdown();
+        }
+        
+        function showGameOver() {
+            gameOverScreen.style.display = 'flex';
+            finalScoreSpan.textContent = score;
+            interactionEnabled = true;
+            
+            // 创建或更新最高分元素
+            let highScoreElem = document.getElementById('high-score');
+            if (!highScoreElem) {
+                const gameOverText = gameOverScreen.querySelector('p');
+                const highScoreText = document.createElement('p');
+                highScoreText.innerHTML = `最高分: <span id="high-score">${highScore}</span>`;
+                
+                // 插入在当前分数后面
+                gameOverText.insertAdjacentElement('afterend', highScoreText);
+            } else {
+                highScoreElem.textContent = highScore;
+            }
+            
+            // 添加新纪录提示
+            if (score === highScore && score > 0) {
+                let newRecordElem = document.getElementById('new-record');
+                if (!newRecordElem) {
+                    const newRecord = document.createElement('p');
+                    newRecord.id = 'new-record';
+                    newRecord.textContent = '🎉 新紀錄! 🎉';
+                    newRecord.style.color = '#f1c40f';
+                    newRecord.style.fontWeight = 'bold';
+                    newRecord.style.fontSize = '20px';
+                    
+                    document.getElementById('high-score').parentElement.insertAdjacentElement('afterend', newRecord);
+                }
+            } else {
+                const existingRecord = document.getElementById('new-record');
+                if (existingRecord) {
+                    existingRecord.remove();
+                }
+            }
+        }
+        
+        function gameLoop(timestamp) {
+            const deltaTime = timestamp - lastTime;
+            lastTime = timestamp;
+            
+            // Clear canvas
+            ctx.clearRect(0, 0, WIDTH, HEIGHT);
+            
+            // Draw background
+            drawBackground();
+            
+            // Update pipes
+            if (gameStarted && !gameOver) {
+                if (timestamp - lastPipeTime > PIPE_FREQUENCY) {
+                    createPipe();
+                    lastPipeTime = timestamp;
+                }
+                updatePipes();
+                
+                // Update bird
+                bird.update();
+                
+                // Update ground position
+                groundX = (groundX - GROUND_SPEED) % 30;
+            } else if (gameOver && !countdownActive) {
+                // Bird still falls after game over
+                bird.update();
+            }
+            
+            // Draw pipes
+            drawPipes();
+            
+            // Draw ground
+            drawGround();
+            
+            // Draw bird
+            bird.draw();
+            
+            // Draw particles
+            particles.forEach(particle => {
+                particle.draw();
+            });
+            
+            // Draw score animations
+            scoreAnimations.forEach(anim => {
+                ctx.fillStyle = 'white';
+                ctx.font = `${anim.size}px Arial`;
+                ctx.textAlign = 'center';
+                ctx.globalAlpha = anim.life;
+                ctx.fillText(anim.value, anim.x, anim.y);
+                ctx.globalAlpha = 1;
+            });
+            
+            // Draw score
+            drawScore();
+            
+            if (gameOver && !countdownActive && gameOverScreen.style.display !== 'flex') {
+                showGameOver();
+                return;
+            }
+            
+            if (!gameOver || countdownActive) {
+                requestAnimationFrame(gameLoop);
+            }
+        }
+        
+        // Create particles for effect - 从下方中间发出特效
+        function createPassEffect(x, y) {
+            const colors = ['#f39c12', '#e74c3c', '#3498db', '#2ecc71', '#9b59b6'];
+            // 创建更多粒子
+            for (let i = 0; i < 30; i++) {
+                particles.push(new Particle(
+                    x,
+                    y,
+                    colors[Math.floor(Math.random() * colors.length)],
+                    true // 使用大特效参数
+                ));
+            }
+            
+            // 添加分数弹出动画
+            scoreAnimations.push({
+                value: "+1",
+                x: x,
+                y: y - 30,
+                size: 30,
+                life: 1,
+                decay: 0.02
+            });
+        }
+        
+        // Pipes array
+        let pipes = [];
+        
+        // Event listeners
+        startButton.addEventListener('click', startGame);
+        restartButton.addEventListener('click', startGame);
+        
+        canvas.addEventListener('click', function() {
+            if (gameStarted && !gameOver) {
+                bird.jump();
+            }
+        });
+        
+        document.addEventListener('keydown', function(event) {
+            if (event.code === 'Space') {
+                if (!gameStarted) {
+                    startGame();
+                } else if (!gameOver && !countdownActive) {
+                    bird.jump();
+                } else if (gameOver && !countdownActive) {
+                    startGame();
+                }
+            }
+        });
+        
+        // Draw initial screen
+        drawBackground();
+        drawGround();
+        bird.draw();
+    </script>
+</body>
+</html>
